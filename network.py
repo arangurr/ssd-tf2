@@ -136,6 +136,7 @@ def create_ssd(num_classes, arch, pretrained_type,
                      for path in os.listdir(checkpoint_dir)]
             latest = sorted(paths, key=os.path.getmtime)[-1]
             net.load_weights(latest)
+            print(f'Weights loaded from {latest}')
         except AttributeError as e:
             print('Please make sure there is at least one checkpoint at {}'.format(
                 checkpoint_dir))
