@@ -6,14 +6,16 @@ import time
 import yaml
 
 from tensorflow.keras.optimizers.schedules import PiecewiseConstantDecay
-from voc_data import create_batch_generator
+import voc_data
+import xray_data
 from anchor import generate_default_boxes
 from network import create_ssd
 from losses import create_losses
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--data-dir', default='../dataset')
+parser.add_argument('--data-type', default='voc', type=str)
+parser.add_argument('--data-dir', default='./data/VOCdevkit')
 parser.add_argument('--data-year', default='2007')
 parser.add_argument('--arch', default='ssd300')
 parser.add_argument('--batch-size', default=32, type=int)
@@ -66,16 +68,24 @@ if __name__ == '__main__':
 
     default_boxes = generate_default_boxes(config)
 
-    batch_generator, val_generator, info = create_batch_generator(
-        args.data_dir, args.data_year, default_boxes,
-        config['image_size'],
-        args.batch_size, args.num_batches,
-        mode='train', augmentation=['flip'])  # the patching algorithm is currently causing bottleneck sometimes
-    
+    if args.data_type == 'voc':
+        batch_generator, val_generator, info = voc_data.create_batch_generator(
+            args.data_dir, args.data_year, default_boxes,
+            config['image_size'],
+            args.batch_size, args.num_batches,
+            mode='train', augmentation=['flip'])  # the patching algorithm is currently causing bottleneck sometimes
+    elif args.data_type == 'xray':
+        batch_generator, val_generator, info = xray_data.create_batch_generator(
+            args.data_dir, default_boxes,
+            config['image_size'],
+            args.batch_size, args.num_batches,
+            mode='train', augmentation=['flip'])  # the patching algorithm is currently causing bottleneck sometimes
+
     try:
         ssd = create_ssd(NUM_CLASSES, args.arch,
-                        args.pretrained_type,
-                        checkpoint_dir=args.checkpoint_dir)
+                         args.pretrained_type,
+                         checkpoint_dir=args.checkpoint_dir)
+        print('SSD initialized')
     except Exception as e:
         print(e)
         print('The program is exiting...')
@@ -89,7 +99,7 @@ if __name__ == '__main__':
         boundaries=[int(steps_per_epoch * args.num_epochs * 2 / 3),
                     int(steps_per_epoch * args.num_epochs * 5 / 6)],
         values=[args.initial_lr, args.initial_lr * 0.1, args.initial_lr * 0.01])
-    
+
     optimizer = tf.keras.optimizers.SGD(
         learning_rate=lr_fn,
         momentum=args.momentum)
@@ -123,8 +133,10 @@ if __name__ == '__main__':
                 val_confs, val_locs, gt_confs, gt_locs)
             val_loss = val_conf_loss + val_loc_loss
             avg_val_loss = (avg_val_loss * i + val_loss.numpy()) / (i + 1)
-            avg_val_conf_loss = (avg_val_conf_loss * i + val_conf_loss.numpy()) / (i + 1)
-            avg_val_loc_loss = (avg_val_loc_loss * i + val_loc_loss.numpy()) / (i + 1)
+            avg_val_conf_loss = (avg_val_conf_loss * i +
+                                 val_conf_loss.numpy()) / (i + 1)
+            avg_val_loc_loss = (avg_val_loc_loss * i +
+                                val_loc_loss.numpy()) / (i + 1)
 
         with train_summary_writer.as_default():
             tf.summary.scalar('loss', avg_loss, step=epoch)

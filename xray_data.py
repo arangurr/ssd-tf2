@@ -1,41 +1,37 @@
-import tensorflow as tf
 import os
-import numpy as np
-import xml.etree.ElementTree as ET
-from PIL import Image
 import random
+import xml.etree.ElementTree as ET
+from functools import partial
+from glob import glob
+
+import numpy as np
+import tensorflow as tf
+from PIL import Image
 
 from box_utils import compute_target
-from image_utils import random_patching, horizontal_flip
-from functools import partial
+from image_utils import horizontal_flip, random_patching
 
 
-class VOCDataset():
-    """ Class for VOC Dataset
+class XRayDataset():
+    """ Class for XRayDataset
 
     Attributes:
         root_dir: dataset root dir (ex: ./data/VOCdevkit)
-        year: dataset's year (2007 or 2012)
         num_examples: number of examples to be used
                       (in case one wants to overfit small data)
     """
 
-    def __init__(self, root_dir, year, default_boxes,
+    def __init__(self, root_dir, default_boxes,
                  new_size, num_examples=-1, augmentation=None):
-        super(VOCDataset, self).__init__()
+        super(XRayDataset, self).__init__()
         self.idx_to_name = [
-            'aeroplane', 'bicycle', 'bird', 'boat',
-            'bottle', 'bus', 'car', 'cat', 'chair',
-            'cow', 'diningtable', 'dog', 'horse',
-            'motorbike', 'person', 'pottedplant',
-            'sheep', 'sofa', 'train', 'tvmonitor']
+            'sponge1', 'needle']
         self.name_to_idx = dict([(v, k)
                                  for k, v in enumerate(self.idx_to_name)])
 
-        self.data_dir = os.path.join(root_dir, 'VOC{}'.format(year))
-        self.image_dir = os.path.join(self.data_dir, 'JPEGImages')
-        self.anno_dir = os.path.join(self.data_dir, 'Annotations')
-        self.ids = list(map(lambda x: x[:-4], os.listdir(self.image_dir)))
+        self.data_dir = root_dir
+        self.ids = list(map(lambda x: os.path.basename(x).split('.')[0], glob(os.path.join(self.data_dir, '*implant*.xml'))))
+        random.shuffle(self.ids)
         self.default_boxes = default_boxes
         self.new_size = new_size
 
@@ -66,7 +62,7 @@ class VOCDataset():
             img: tensor of shape (3, 300, 300)
         """
         filename = self.ids[index]
-        img_path = os.path.join(self.image_dir, filename + '.jpg')
+        img_path = os.path.join(self.data_dir, filename + '.implant.png')
         img = Image.open(img_path)
 
         return img
@@ -86,18 +82,22 @@ class VOCDataset():
         """
         h, w = orig_shape
         filename = self.ids[index]
-        anno_path = os.path.join(self.anno_dir, filename + '.xml')
-        objects = ET.parse(anno_path).findall('object')
+        anno_path = os.path.join(self.data_dir, filename + '.implant.sponge1.posWin.xml')
+        windows = ET.parse(anno_path).find('Windows') # Get the Windows tag
+        objects = windows.findall('_') # Find all objects in image
         boxes = []
         labels = []
 
         for obj in objects:
-            name = obj.find('name').text.lower().strip()
-            bndbox = obj.find('bndbox')
-            xmin = (float(bndbox.find('xmin').text) - 1) / w
-            ymin = (float(bndbox.find('ymin').text) - 1) / h
-            xmax = (float(bndbox.find('xmax').text) - 1) / w
-            ymax = (float(bndbox.find('ymax').text) - 1) / h
+            name = 'sponge1'
+            # name = obj.find('name').text.lower().strip()
+            xmin = (float(obj.find('x').text))
+            ymin = (float(obj.find('y').text))
+            
+            xmin = (float(obj.find('x').text) - 1) / w
+            ymin = (float(obj.find('y').text) - 1) / h
+            xmax = (float(obj.find('width').text) - 1) / w + xmin
+            ymax = (float(obj.find('height').text) - 1) / h + ymin
             boxes.append([xmin, ymin, xmax, ymax])
 
             labels.append(self.name_to_idx[name] + 1)
@@ -148,27 +148,26 @@ class VOCDataset():
             yield filename, img, gt_confs, gt_locs
 
 
-def create_batch_generator(root_dir, year, default_boxes,
+def create_batch_generator(root_dir, default_boxes,
                            new_size, batch_size, num_batches,
                            mode,
                            augmentation=None):
     num_examples = batch_size * num_batches if num_batches > 0 else -1
-    voc = VOCDataset(root_dir, year, default_boxes,
-                     new_size, num_examples, augmentation)
+    xray = XRayDataset(root_dir, default_boxes,
+                       new_size, num_examples, augmentation)
 
     info = {
-        'idx_to_name': voc.idx_to_name,
-        'name_to_idx': voc.name_to_idx,
-        'length': len(voc),
-        'image_dir': voc.image_dir,
-        'anno_dir': voc.anno_dir
+        'idx_to_name': xray.idx_to_name,
+        'name_to_idx': xray.name_to_idx,
+        'length': len(xray),
+        'image_dir': xray.data_dir,
     }
 
     if mode == 'train':
-        train_gen = partial(voc.generate, subset='train')
+        train_gen = partial(xray.generate, subset='train')
         train_dataset = tf.data.Dataset.from_generator(
             train_gen, (tf.string, tf.float32, tf.int64, tf.float32))
-        val_gen = partial(voc.generate, subset='val')
+        val_gen = partial(xray.generate, subset='val')
         val_dataset = tf.data.Dataset.from_generator(
             val_gen, (tf.string, tf.float32, tf.int64, tf.float32))
 
@@ -178,9 +177,10 @@ def create_batch_generator(root_dir, year, default_boxes,
         return train_dataset.take(num_batches), val_dataset.take(-1), info
     else:
         dataset = tf.data.Dataset.from_generator(
-            voc.generate, (tf.string, tf.float32, tf.int64, tf.float32))
+            xray.generate, (tf.string, tf.float32, tf.int64, tf.float32))
         dataset = dataset.batch(batch_size)
         return dataset.take(num_batches), info
+
 
 
 from anchor import generate_default_boxes
@@ -198,8 +198,7 @@ if __name__ == "__main__":
     default_boxes = generate_default_boxes(config)
 
     batch_generator, val_generator, info = create_batch_generator(
-        'data/VOCdevkit',
-        2007, 
+        '../xraydata/sponge1/', 
         default_boxes,
         300,
         32,
@@ -208,4 +207,4 @@ if __name__ == "__main__":
     )
 
     for i, (_, imgs, gt_confs, gt_locs) in enumerate(batch_generator):
-        print(i)
+        print(f'Image {i}, {gt_confs}')
