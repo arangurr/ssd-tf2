@@ -188,7 +188,7 @@ import yaml
 if __name__ == "__main__":
 
     with open('./config.yml') as f:
-        cfg = yaml.load(f)
+        cfg = yaml.safe_load(f)
 
     try:
         config = cfg['SSD300']
