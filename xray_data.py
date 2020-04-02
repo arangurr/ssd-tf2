@@ -139,8 +139,11 @@ class XRayDataset():
 
             img = np.array(img.resize(
                 (self.new_size, self.new_size)), dtype=np.float32)
+            img = np.repeat(img[:,:,np.newaxis], 3, axis=2) # transform grayscale into "forced" rgb
             img = (img / 127.0) - 1.0
             img = tf.constant(img, dtype=tf.float32)
+
+            # print(tf.shape(img))
 
             gt_confs, gt_locs = compute_target(
                 self.default_boxes, boxes, labels)
@@ -162,6 +165,8 @@ def create_batch_generator(root_dir, default_boxes,
         'length': len(xray),
         'image_dir': xray.data_dir,
     }
+
+    print(f'dataset contains {len(xray)} samples')
 
     if mode == 'train':
         train_gen = partial(xray.generate, subset='train')
