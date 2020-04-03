@@ -8,7 +8,8 @@ from tqdm import tqdm
 
 from anchor import generate_default_boxes
 from box_utils import decode, compute_nms
-from voc_data import create_batch_generator
+import voc_data
+import xray_data
 from image_utils import ImageVisualizer
 from losses import create_losses
 from network import create_ssd
@@ -24,6 +25,7 @@ parser.add_argument('--pretrained-type', default='specified')
 parser.add_argument('--checkpoint-dir', default='')
 parser.add_argument('--checkpoint-path', default='')
 parser.add_argument('--gpu-id', default='0')
+parser.add_argument('--data-type', default='voc', type=str)
 
 args = parser.parse_args()
 
@@ -79,7 +81,7 @@ def predict(imgs, default_boxes):
 
 if __name__ == '__main__':
     with open('./config.yml') as f:
-        cfg = yaml.load(f)
+        cfg = yaml.safe_load(f)
 
     try:
         config = cfg[args.arch.upper()]
@@ -88,10 +90,18 @@ if __name__ == '__main__':
 
     default_boxes = generate_default_boxes(config)
 
-    batch_generator, info = create_batch_generator(
-        args.data_dir, args.data_year, default_boxes,
-        config['image_size'],
-        BATCH_SIZE, args.num_examples, mode='test')
+    if args.data_type == 'voc':
+        batch_generator, info = voc_data.create_batch_generator(
+            args.data_dir, args.data_year, default_boxes,
+            config['image_size'],
+            BATCH_SIZE, args.num_examples, mode='test')
+    elif args.data_type == 'xray':
+        batch_generator, info = xray_data.create_batch_generator(
+            args.data_dir, default_boxes,
+            config['image_size'],
+            BATCH_SIZE, args.num_examples, mode='test')
+    else:
+        print('Unknown data type')
 
     try:
         ssd = create_ssd(NUM_CLASSES, args.arch,
@@ -113,7 +123,7 @@ if __name__ == '__main__':
         boxes, classes, scores = predict(imgs, default_boxes)
         filename = filename.numpy()[0].decode()
         original_image = Image.open(
-            os.path.join(info['image_dir'], '{}.jpg'.format(filename)))
+            os.path.join(info['image_dir'], '{}.implant.png'.format(filename)))
         boxes *= original_image.size * 2
         visualizer.save_image(
             original_image, boxes, classes, '{}.jpg'.format(filename))
